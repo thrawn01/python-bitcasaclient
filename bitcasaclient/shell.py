@@ -70,7 +70,7 @@ def authenticate(client, conf):
     return client
 
 
-def client_factory(conf):
+def clientFactory(conf):
     """ Create a BitcasaClient with an access-token attached """
     conf = dict(conf.items('bitcasa'))
     token = config.readTokenFile('~/.bitcasa-token')
@@ -84,15 +84,15 @@ def client_factory(conf):
     return authenticate(client, conf)
 
 
-def download_dir(client, conf, download_dir):
+def downloadDir(client, conf, path):
     try:
         # Get any completed files from this directory download
-        completed = dict(conf.items(download_dir))
+        completed = dict(conf.items(path))
     except config.NoSectionError:
         completed = {}
 
     # Get a listing of the directory files
-    folder = client.get_folder(download_dir)
+    folder = client.get_folder(path)
     for item in folder.items:
         if item.path in completed.keys():
             print("-- Skip '%s' - Completed" % item.name)
@@ -103,42 +103,36 @@ def download_dir(client, conf, download_dir):
             continue
         # Only Download Files
         if isinstance(item, BitcasaFile):
-            try:
-                download_file(item)
-                # Add the file to the completed list
-                completed[item.path] = item.name
-                continue
-            except Exception:
-                # Save our download directory progress
-                config.saveCompleted(conf, download_dir, completed)
-                # Re-raise the original exception
-                raise
+            download_bitcasa_file(client, conf, item)
+            # Add the file to the completed list
+            completed[item.path] = item.name
+            config.saveCompleted(conf, path, completed, '~/.bitcasa')
+            continue
         print("-- Skip '%s' - Unknown Item" % item)
 
     # If this was a resumed download, remove the section
-    if conf.remove_section(download_dir):
-        # If the remove found the section, write the config
-        config.saveConfig(conf)
-
-    pprint.pprint(completed)
+    if conf.remove_section(path):
+        # If the remove found specified section, write the config
+        config.saveConfig(conf, '~/.bitcasa')
     return 0
 
 
-def download_file(client, conf, path):
+def downloadFile(client, conf, path):
     # First fetch info on the file (file size, etc)
     bitcasa_file = client.get_file(path)
     # Then download the file
     download_bitcasa_file(client, conf, bitcasa_file)
 
 
-def handle_download_file(client, conf, file):
-    def update_progress(elapsed):
+def handle_downloadFile(client, conf, file):
+    def updateProgress(elapsed):
         if conf.opt.no_progress:
             return
         percent = round((float(total_bytes) / file.size) * 100, 2)
         kbs = (float(bytes) / elapsed) / 1024
         sys.stdout.write('\r[{0}] {1}%  {2:.2f} KB/s      '
-                         .format(('='*int((percent/10))).ljust(10), percent, kbs))
+                         .format(('='*int((percent/10))).ljust(10),
+                                 percent, kbs))
 
     start, count, bytes, total_bytes = Timer(), 0, 0, 0
     with open(file.name, 'w') as fd:
@@ -153,11 +147,11 @@ def handle_download_file(client, conf, file):
             # Update progress every 20 chunks
             if (count % 30) == 0 and count != 0:
                 total_bytes += bytes
-                update_progress((Timer() - start))
+                updateProgress((Timer() - start))
                 # Reset the start time and the transfered bytes
                 start = Timer()
                 bytes = 0
-    update_progress((Timer() - start))
+    updateProgress((Timer() - start))
     sys.stdout.write('\n')
 
 
@@ -165,7 +159,7 @@ def download_bitcasa_file(client, conf, file):
     print("-- Downloading '%s' (%s)" % (file.name, file.path))
 
     start = Timer()
-    handle_download_file(client, conf, file)
+    handle_downloadFile(client, conf, file)
     elapsed = (Timer() - start)
     print("-- %s (%.2f KB/s) - %s saved [%s]" % (
         datetime.today(),
@@ -188,7 +182,7 @@ def main():
         # Add the options to the config object
         conf.opt = opt
         # Create the Bitcasa Client
-        client = client_factory(conf)
+        client = clientFactory(conf)
 
         # Directory listing
         if opt.command == 'ls':
@@ -201,11 +195,11 @@ def main():
 
         # Download a single file
         if opt.command == 'get':
-            return download_file(client, conf, opt.path)
+            return downloadFile(client, conf, opt.path)
 
         # Download an entire directory
         if opt.command == 'get-dir':
-            return download_dir(client, conf, opt.path)
+            return downloadDir(client, conf, opt.path)
 
     except RuntimeError, e:
         print(str(e), file=sys.stderr)

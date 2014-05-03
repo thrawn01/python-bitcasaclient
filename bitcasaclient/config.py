@@ -47,17 +47,17 @@ def extract_config(client):
     }
 
 
-def writeDict(file_name, conf):
-    file_name = os.path.expanduser(file_name)
-    print("-- Writing: %s" % file_name)
-    with open(file_name, 'w') as fd:
+def writeDict(fileName, conf):
+    fileName = os.path.expanduser(fileName)
+    print("-- Writing: %s" % fileName)
+    with open(fileName, 'w') as fd:
         fd.write('[bitcasa]\n')
         for key, value in conf.items():
             fd.write("%s=%s\n" % (key, value))
 
 
-def writeTokenFile(file_name, client):
-    writeDict(file_name, {'access-token': client.access_token})
+def writeTokenFile(fileName, client):
+    writeDict(fileName, {'access-token': client.access_token})
 
 
 def readTokenFile(file):
@@ -67,22 +67,26 @@ def readTokenFile(file):
         return None
 
 
-def saveConfig(config, file):
-    with open(file_name, 'w') as fd:
+def saveConfig(config, fileName):
+    fileName = os.path.expanduser(fileName)
+    with open(fileName, 'w') as fd:
         config.write(fd)
 
 
-def saveCompleted(conf, download_dir, completed):
+def saveCompleted(conf, downloadDir, completed, fileName):
     """ Save a listing of the file already downloaded for this directory """
     try:
-        conf.add_section(download_dir)
+        # No need to save an empty list
+        if len(completed) == 0:
+            return
+        conf.add_section(downloadDir)
     except DuplicateSectionError:
         pass
 
     for key, value in completed.items():
-        conf.set(download_dir, key, value)
+        conf.set(downloadDir, key, value)
     # Write the config
-    saveConfig(conf)
+    saveConfig(conf, fileName)
 
 
 def readConfig(file):
