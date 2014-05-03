@@ -15,8 +15,10 @@
 from __future__ import print_function
 
 from bitcasa import BitcasaClient, BitcasaFile, BitcasaFolder
+from timeit import default_timer as Timer
 from argparse import ArgumentParser
 from bitcasaclient import config
+from datetime import datetime
 import requests
 import urlparse
 import pprint
@@ -59,7 +61,7 @@ def authenticate(client, conf):
     code = parsed_qs['authorization_code']
     print("-- Got Auth Code: %s" % code)
 
-    # This call makes another call to the API to 
+    # This call makes another call to the API to
     # retrieve the access-token
     client.authenticate(code)
 
@@ -106,7 +108,7 @@ def download_dir(client, conf, download_dir):
                 # Add the file to the completed list
                 completed[item.path] = item.name
                 continue
-            except Exception, e:
+            except Exception:
                 # Save our download directory progress
                 config.saveCompleted(conf, download_dir, completed)
                 # Re-raise the original exception
@@ -122,34 +124,86 @@ def download_dir(client, conf, download_dir):
     return 0
 
 
-def download_file(file):
+def download_file(client, conf, path):
+    # First fetch info on the file (file size, etc)
+    bitcasa_file = client.get_file(path)
+    # Then download the file
+    download_bitcasa_file(client, conf, bitcasa_file)
+
+
+def handle_download_file(client, conf, file):
+    def update_progress(elapsed):
+        if conf.opt.no_progress:
+            return
+        percent = round((float(bytes) / file.size) * 100, 2)
+        kbs = (float(bytes) / elapsed) / 1024
+        sys.stdout.write('\r[{0}] {1}%  {2:.2f} KB/s      '
+                         .format(('='*int((percent/10))).ljust(10), percent, kbs))
+
+    start, count, bytes = Timer(), 0, 0
+    with open(file.name, 'w') as fd:
+        # Fetch the file as a chunked http response
+        for chunk in client.get_file_contents(file.name, file.path):
+            # Write the chunk
+            fd.write(chunk)
+            # Record the number of bytes received
+            bytes += len(chunk)
+            # Count the number of chunks
+            count += 1
+            # Update progress every 20 chunks
+            if (count % 20) == 0 and count != 0:
+                update_progress((Timer() - start))
+                # Reset the start time
+                start = Timer()
+    update_progress((Timer() - start))
+    sys.stdout.write('\n')
+
+
+def download_bitcasa_file(client, conf, file):
     print("-- Downloading '%s' (%s)" % (file.name, file.path))
+
+    start = Timer()
+    handle_download_file(client, conf, file)
+    elapsed = (Timer() - start)
+    print("-- %s (%.2f KB/s) - %s saved [%s]" % (
+        datetime.today(),
+        (float(file.size) / elapsed) / 1024,
+        file.name, file.size))
 
 
 def main():
     try:
         p = ArgumentParser("bitcasa downloader")
-        p.add_argument('-l', '--list', help="List the contents of a directory")
-        p.add_argument('-dd', '--download-dir',
-                       help="Download all files in directory (not subfolders)")
-        args = p.parse_args()
+        p.add_argument('command', choices=['ls', 'get', 'get-dir', 'put'],
+                       help="CLI Command to execute (See Commands)")
+        p.add_argument('path', help="Path the command will operate on")
+        p.add_argument('-p', '--no-progress', action='store_const', const=True,
+                       default=False, help="Silence the progress bar")
+        opt = p.parse_args()
 
         # Read the config file and create a client
         conf = config.readConfig('~/.bitcasa')
+        # Add the options to the config object
+        conf.opt = opt
+        # Create the Bitcasa Client
         client = client_factory(conf)
 
-        # If we only want a directory listing
-        if args.list:
-            folder = client.get_folder(args.list)
+        # Directory listing
+        if opt.command == 'ls':
+            folder = client.get_folder(opt.path)
             print(folder)
             for item in folder.items:
                 #print("Name: %s - %s" % (item.name, item.path))
                 print(item)
             return 0
 
-        # If we want to download a entire directory
-        if args.download_dir:
-            return download_dir(client, conf, args.download_dir)
+        # Download a single file
+        if opt.command == 'get':
+            return download_file(client, conf, opt.path)
+
+        # Download an entire directory
+        if opt.command == 'get-dir':
+            return download_dir(client, conf, opt.path)
 
     except RuntimeError, e:
         print(str(e), file=sys.stderr)
