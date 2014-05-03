@@ -135,12 +135,12 @@ def handle_download_file(client, conf, file):
     def update_progress(elapsed):
         if conf.opt.no_progress:
             return
-        percent = round((float(bytes) / file.size) * 100, 2)
+        percent = round((float(total_bytes) / file.size) * 100, 2)
         kbs = (float(bytes) / elapsed) / 1024
         sys.stdout.write('\r[{0}] {1}%  {2:.2f} KB/s      '
                          .format(('='*int((percent/10))).ljust(10), percent, kbs))
 
-    start, count, bytes = Timer(), 0, 0
+    start, count, bytes, total_bytes = Timer(), 0, 0, 0
     with open(file.name, 'w') as fd:
         # Fetch the file as a chunked http response
         for chunk in client.get_file_contents(file.name, file.path):
@@ -151,10 +151,12 @@ def handle_download_file(client, conf, file):
             # Count the number of chunks
             count += 1
             # Update progress every 20 chunks
-            if (count % 20) == 0 and count != 0:
+            if (count % 30) == 0 and count != 0:
+                total_bytes += bytes
                 update_progress((Timer() - start))
-                # Reset the start time
+                # Reset the start time and the transfered bytes
                 start = Timer()
+                bytes = 0
     update_progress((Timer() - start))
     sys.stdout.write('\n')
 
