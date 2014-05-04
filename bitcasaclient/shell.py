@@ -17,7 +17,7 @@ from __future__ import print_function
 from bitcasa import BitcasaClient, BitcasaFile, BitcasaFolder
 from timeit import default_timer as Timer
 from argparse import ArgumentParser
-from bitcasaclient import config
+from bitcasaclient import config, utils
 from datetime import datetime
 import requests
 import urlparse
@@ -124,7 +124,7 @@ def downloadFile(client, conf, path):
     download_bitcasa_file(client, conf, bitcasa_file)
 
 
-def handle_downloadFile(client, conf, file):
+def handle_downloadFile(client, conf, file, force=False):
     def updateProgress(elapsed):
         if conf.opt.no_progress:
             return
@@ -140,31 +140,56 @@ def handle_downloadFile(client, conf, file):
         for chunk in client.get_file_contents(file.name, file.path):
             # Write the chunk
             fd.write(chunk)
-            # Record the number of bytes received
+            # Record the number of bytes received for speed calculation
             bytes += len(chunk)
+            # Record the total number of bytes for precent calculation
+            total_bytes += len(chunk)
             # Count the number of chunks
             count += 1
             # Update progress every 20 chunks
             if (count % 30) == 0 and count != 0:
-                total_bytes += bytes
                 updateProgress((Timer() - start))
                 # Reset the start time and the transfered bytes
                 start = Timer()
                 bytes = 0
     updateProgress((Timer() - start))
     sys.stdout.write('\n')
+    return total_bytes
 
 
 def download_bitcasa_file(client, conf, file):
     print("-- Downloading '%s' (%s)" % (file.name, file.path))
+    totalAttempts = 2
 
-    start = Timer()
-    handle_downloadFile(client, conf, file)
-    elapsed = (Timer() - start)
-    print("-- %s (%.2f KB/s) - %s saved [%s]" % (
-        datetime.today(),
-        (float(file.size) / elapsed) / 1024,
-        file.name, file.size))
+    # If file exists, and is of correct size don't
+    # download again unless overwrite is requested
+    size = utils.isComplete(file)
+    if size != 0 and not conf.opt.overwrite:
+        print("-- File '%s' exists, Skip.." % file.name)
+        return
+
+    attempt, size = totalAttempts, 0
+    while attempt != 0:
+        start = Timer()
+        # Preform the download and display progress bar
+        size = handle_downloadFile(client, conf, file)
+        elapsed = (Timer() - start)
+        print("-- %s (%.2f KB/s) - %s saved [%s/%s]" % (
+            datetime.today(),
+            (float(file.size) / elapsed) / 1024,
+            file.name, size, file.size))
+
+        # If the file sizes match, download is complete
+        if size == file.size:
+            return size
+
+        attempt -= 1
+        def retryMessage():
+            if attempt == 0:
+                return "Failed, Retries exhausted"
+            return "Retry attempt '%d'" % (abs(totalAttempts - attempt) + 1)
+        print("-- File download was incomplete - %s" % retryMessage())
+    return size
 
 
 def main():
@@ -175,6 +200,9 @@ def main():
         p.add_argument('path', help="Path the command will operate on")
         p.add_argument('-p', '--no-progress', action='store_const', const=True,
                        default=False, help="Silence the progress bar")
+        p.add_argument('-o', '--overwrite', action='store_const', const=True,
+                       default=False, help="Forces download even if the file "
+                       "exists locally and is of correct size")
         opt = p.parse_args()
 
         # Read the config file and create a client
