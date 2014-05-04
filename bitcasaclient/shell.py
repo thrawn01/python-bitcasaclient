@@ -192,10 +192,21 @@ def download_bitcasa_file(client, conf, file):
     return size
 
 
+def fromList(client, conf, fileName):
+    """ fileName must consist of bitcasa paths separated by a newline """
+
+    with open(fileName) as fd:
+        for line in fd:
+            # Skip comment lines
+            if re.match("^#", line):
+                continue
+            downloadFile(client, conf, line.rstrip())
+
+
 def main():
     try:
         p = ArgumentParser("bitcasa downloader")
-        p.add_argument('command', choices=['ls', 'get', 'get-dir', 'put'],
+        p.add_argument('command', choices=['ls', 'get', 'get-dir', 'from-list'],
                        help="CLI Command to execute (See Commands)")
         p.add_argument('path', help="Path the command will operate on")
         p.add_argument('-p', '--no-progress', action='store_const', const=True,
@@ -228,6 +239,10 @@ def main():
         # Download an entire directory
         if opt.command == 'get-dir':
             return downloadDir(client, conf, opt.path)
+
+        # Download a list of paths specified in file
+        if opt.command == 'from-list':
+            return fromList(client, conf, opt.path)
 
     except RuntimeError, e:
         print(str(e), file=sys.stderr)
