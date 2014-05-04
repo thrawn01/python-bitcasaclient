@@ -165,7 +165,7 @@ def download_bitcasa_file(client, conf, file):
     # download again unless overwrite is requested
     size = utils.isComplete(file)
     if size != 0 and not conf.opt.overwrite:
-        print("-- File '%s' exists, Skip.." % file.name)
+        print("-- File '%s' exists and has correct size, Skip.." % file.name)
         return
 
     attempt, size = totalAttempts, 0
