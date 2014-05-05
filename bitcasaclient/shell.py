@@ -21,7 +21,6 @@ from bitcasaclient import config, utils
 from datetime import datetime
 import requests
 import urlparse
-import pprint
 import sys
 import re
 
@@ -70,14 +69,15 @@ def authenticate(client, conf):
     return client
 
 
-def clientFactory(conf):
+def clientFactory(configObj):
     """ Create a BitcasaClient with an access-token attached """
-    conf = dict(conf.items('bitcasa'))
+    conf = dict(configObj.items('bitcasa'))
     token = config.readTokenFile('~/.bitcasa-token')
     client = BitcasaClient(conf['client-id'], conf['secret'],
                            conf['redirect-url'], access_token=token)
     if token:
-        print("-- Found ~/.bitcasa-token, using...")
+        if configObj.opt.verbose:
+            print("-- Found ~/.bitcasa-token, using...")
         return client
 
     # If we don't already have an access-token, authenticate to get one
@@ -159,7 +159,6 @@ def handle_downloadFile(client, conf, file, force=False):
 
 def download_bitcasa_file(client, conf, file):
     print("-- Downloading '%s' (%s)" % (file.name, file.path))
-    totalAttempts = 2
 
     # If file exists, and is of correct size don't
     # download again unless overwrite is requested
@@ -168,7 +167,7 @@ def download_bitcasa_file(client, conf, file):
         print("-- File '%s' exists and has correct size, Skip.." % file.name)
         return
 
-    attempt, size = totalAttempts, 0
+    attempt, size = conf.opt.attempts, 0
     while attempt != 0:
         start = Timer()
         # Preform the download and display progress bar
@@ -184,17 +183,17 @@ def download_bitcasa_file(client, conf, file):
             return size
 
         attempt -= 1
+
         def retryMessage():
             if attempt == 0:
                 return "Failed, Retries exhausted"
-            return "Retry attempt '%d'" % (abs(totalAttempts - attempt) + 1)
+            return "Retry attempt '%d'" % (abs(conf.opt.attempts - attempt) + 1)
         print("-- File download was incomplete - %s" % retryMessage())
     return size
 
 
 def fromList(client, conf, fileName):
     """ fileName must consist of bitcasa paths separated by a newline """
-
     with open(fileName) as fd:
         for line in fd:
             # Skip comment lines
@@ -205,7 +204,7 @@ def fromList(client, conf, fileName):
 
 def main():
     try:
-        p = ArgumentParser("bitcasa downloader")
+        p = ArgumentParser("bitcasa command line arguments")
         p.add_argument('command', choices=['ls', 'get', 'get-dir', 'from-list'],
                        help="CLI Command to execute (See Commands)")
         p.add_argument('path', help="Path the command will operate on")
@@ -214,11 +213,19 @@ def main():
         p.add_argument('-o', '--overwrite', action='store_const', const=True,
                        default=False, help="Forces download even if the file "
                        "exists locally and is of correct size")
+        p.add_argument('-lp', '--ls-path-only', action='store_const',
+                       const=True, default=False,
+                       help="When preforming a directory listing,"
+                       " only print the paths and not the names")
+        p.add_argument('-v', '--verbose', action='store_const', const=True,
+                       default=False, help="Be as verbose as possible")
+        p.add_argument('-a', '--attempts', default=3, help="How many attempts"
+                       " will be made to download/upload a file")
         opt = p.parse_args()
 
         # Read the config file and create a client
         conf = config.readConfig('~/.bitcasa')
-        # Add the options to the config object
+        # Add commandline options to the config object
         conf.opt = opt
         # Create the Bitcasa Client
         client = clientFactory(conf)
@@ -226,9 +233,12 @@ def main():
         # Directory listing
         if opt.command == 'ls':
             folder = client.get_folder(opt.path)
-            print(folder)
+            if opt.verbose:
+                print(folder)
             for item in folder.items:
-                #print("Name: %s - %s" % (item.name, item.path))
+                if opt.ls_path_only:
+                    print(item.path)
+                    continue
                 print(item)
             return 0
 
@@ -247,6 +257,3 @@ def main():
     except RuntimeError, e:
         print(str(e), file=sys.stderr)
         return 1
-
-if __name__ == '__main__':
-    sys.exit(main())
